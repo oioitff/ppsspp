@@ -47,12 +47,20 @@ public:
 	void addStreamData(int offset, u8* buf, int size, int cursample);
 private:
 	int m_ID;
+	char m_filename[256];
+
+public:
 	int m_channel;
 };
 
 void addAtrac3Audio(u8* stream, int streamsize, int atracID);
+bool addAtrac3AudioByPackage(const char* package, u32 startpos, int audiosize, 
+	                        u8* buffer, int atracID, void* pgd_info = 0);
 audioEngine* getaudioEngineByID(int atracID);
 void deleteAtrac3Audio(int atracID);
+
+int generateAudioFilename(u8* buf, char* outfilename);
+bool checkAudioFileExist(u8* buf, char* outfilename = 0);
 
 void initaudioEngine();
 void shutdownEngine();
