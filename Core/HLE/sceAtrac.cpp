@@ -58,7 +58,7 @@ const int PSP_ATRAC_LOOP_STREAM_DATA_IS_ON_MEMORY = -3;
 
 const u32 ATRAC_MAX_SAMPLES = 1024;
 
-#ifdef USE_FFMPEG
+#ifdef _USE_FFMPEG_
 
 // Urgh! Why is this needed?
 #ifdef ANDROID
@@ -72,7 +72,7 @@ extern "C" {
 #include <libswresample/swresample.h>
 #include <libavutil/samplefmt.h>
 }
-#endif // USE_FFMPEG
+#endif // _USE_FFMPEG_
 
 #ifdef _USE_DSHOW_
 #include "../HW/audioPlayer.h"
@@ -107,13 +107,13 @@ struct Atrac {
 		currentSample(0), endSample(-1), firstSampleoffset(0), loopinfoNum(0) {
 		memset(&first, 0, sizeof(first));
 		memset(&second, 0, sizeof(second));
-#ifdef USE_FFMPEG
+#ifdef _USE_FFMPEG_
 		pFormatCtx = 0;
 		pAVIOCtx = 0;
 		pCodecCtx = 0;
 		pSwrCtx = 0;
 		pFrame = 0;
-#endif // USE_FFMPEG
+#endif // _USE_FFMPEG_
 	}
 
 	~Atrac() { 
@@ -121,9 +121,9 @@ struct Atrac {
 	}
 
 	void CleanStuff() {
-#ifdef USE_FFMPEG
+#ifdef _USE_FFMPEG_
 		ReleaseFFMPEGContext();
-#endif // USE_FFMPEG
+#endif // _USE_FFMPEG_
 
 #ifdef _USE_DSHOW_
 		deleteAtrac3Audio(atracID);
@@ -227,7 +227,7 @@ struct Atrac {
 	InputBuffer first;
 	InputBuffer second;
 
-#ifdef USE_FFMPEG
+#ifdef _USE_FFMPEG_
 	AVFormatContext *pFormatCtx;
 	AVIOContext	    *pAVIOCtx;
 	AVCodecContext  *pCodecCtx;
@@ -258,7 +258,7 @@ struct Atrac {
 		s64 seek_pos = (s64)sample;
 		av_seek_frame(pFormatCtx, audio_stream_index, seek_pos, 0);
 	}
-#endif // USE_FFMPEG
+#endif // _USE_FFMPEG_
 
 };
 
@@ -267,10 +267,10 @@ u8 nextAtracID;
 
 void __AtracInit() {
 	nextAtracID = 0;
-#ifdef USE_FFMPEG
+#ifdef _USE_FFMPEG_
 	avcodec_register_all();
 	av_register_all();
-#endif // USE_FFMPEG
+#endif // _USE_FFMPEG_
 
 #ifdef _USE_DSHOW_
 	initaudioEngine();
@@ -279,6 +279,10 @@ void __AtracInit() {
 }
 
 void __AtracDoState(PointerWrap &p) {
+#ifdef _USE_FFMPEG_
+	p.Do(Memory::lastestAccessFile);
+#endif // _USE_FFMPEG
+
 	p.Do(atracMap);
 	p.Do(nextAtracID);
 
@@ -509,7 +513,7 @@ u32 sceAtracDecodeData(int atracID, u32 outAddr, u32 numSamplesAddr, u32 finishF
 		} else {
 			// TODO: This isn't at all right, but at least it makes the music "last" some time.
 			u32 numSamples = 0;
-#ifdef USE_FFMPEG
+#ifdef _USE_FFMPEG_
 			if (atrac->codeType == PSP_MODE_AT_3 && atrac->pCodecCtx) {
 				int forceseekSample = atrac->currentSample * 2 > atrac->endSample ? 0 : atrac->endSample;
 				atrac->SeekToSample(forceseekSample);
@@ -546,7 +550,7 @@ u32 sceAtracDecodeData(int atracID, u32 outAddr, u32 numSamplesAddr, u32 finishF
 				}
 
 			} else
-#endif // USE_FFMPEG
+#endif // _USE_FFMPEG_
 
 #ifdef _USE_DSHOW_
 			if (engine) {
@@ -854,11 +858,11 @@ u32 sceAtracResetPlayPosition(int atracID, int sample, int bytesWrittenFirstBuf,
 			engine->setPlaySample(sample);
 		}
 #endif // _USE_DSHOW_
-#ifdef USE_FFMPEG
+#ifdef _USE_FFMPEG_
 		if (atrac->codeType == PSP_MODE_AT_3 && atrac->pCodecCtx) {
 			atrac->SeekToSample(sample);
 		} else
-#endif // USE_FFMPEG
+#endif // _USE_FFMPEG_
 		{
 			atrac->decodePos = atrac->getDecodePosBySample(sample);
 		}
@@ -866,7 +870,7 @@ u32 sceAtracResetPlayPosition(int atracID, int sample, int bytesWrittenFirstBuf,
 	return 0;
 }
 
-#ifdef USE_FFMPEG
+#ifdef _USE_FFMPEG_
 int _AtracReadbuffer(void *opaque, uint8_t *buf, int buf_size)
 {
 	Atrac *atrac = (Atrac*)opaque;
@@ -895,13 +899,32 @@ int64_t _AtracSeekbuffer(void *opaque, int64_t offset, int whence)
 	return offset;
 }
 
-#endif // USE_FFMPEG
+#endif // _USE_FFMPEG_
 
 int __AtracSetContext(Atrac *atrac, u32 buffer, u32 bufferSize)
 {
 #ifdef _USE_DSHOW_
-	if (atrac->codeType == PSP_MODE_AT_3_PLUS && atrac->atracChannels != 1) {
-		addAtrac3Audio(atrac->data_buf, atrac->first.size, atrac->atracID);
+	if (atrac->codeType == PSP_MODE_AT_3_PLUS) {
+		Memory::LASTESTFILECACHE *cache = 0;
+		if (atrac->atracChannels == 1)
+			Memory::lastestAccessFile.findmatchcache(atrac->data_buf);
+		if ((atrac->first.size >= atrac->first.filesize) || 
+			(atrac->atracChannels == 1 && atrac->first.filesize >= 0x19000 
+			&& checkAudioFileExist(atrac->data_buf))) {
+			addAtrac3Audio(atrac->data_buf, atrac->first.filesize, atracID);
+		} else if (cache) {
+			PGD_DESC pgdinfo = cache->pgd_info;
+			if (cache->npdrm) {
+				pgdinfo.block_buf = new u8[pgdinfo.block_size];
+			}
+			addAtrac3AudioByPackage(cache->packagefile, cache->start_pos, atrac->first.filesize,
+			                        atrac->data_buf, atracID, cache->npdrm ? &pgdinfo : 0);
+			if (cache->npdrm) {
+				delete [] pgdinfo.block_buf;
+			}
+		} else {
+			addAtrac3Audio(atrac->data_buf, atrac->first.size, atracID);
+		}
 		if (atrac->currentSample != 0) {
 			audioEngine *engine = getaudioEngineByID(atrac->atracID);
 			if (engine)
@@ -911,7 +934,7 @@ int __AtracSetContext(Atrac *atrac, u32 buffer, u32 bufferSize)
 	}
 #endif // _USE_DSHOW_
 
-#ifdef USE_FFMPEG
+#ifdef _USE_FFMPEG_
 	u8* tempbuf = (u8*)av_malloc(atrac->atracBufSize);
 
 	atrac->pFormatCtx = avformat_alloc_context();
@@ -1006,15 +1029,12 @@ int _AtracSetData(Atrac *atrac, u32 buffer, u32 bufferSize)
 #endif // USE_FFMPEG
 
 	} else if (atrac->codeType == PSP_MODE_AT_3_PLUS) {
-		if (atrac->atracChannels == 1) {
-			WARN_LOG(HLE, "This is an atrac3+ mono audio (Unsupported)");
-		} else {
-			WARN_LOG(HLE, "This is an atrac3+ stereo audio");
-
+		WARN_LOG(HLE, "This is an atrac3+ audio");
 #ifdef _USE_DSHOW_
-			atrac->data_buf = new u8[atrac->first.filesize];
-			Memory::Memcpy(atrac->data_buf, buffer, std::min(bufferSize, atrac->first.filesize));
-			return __AtracSetContext(atrac, buffer, bufferSize);
+		atrac->data_buf = new u8[atrac->first.filesize];
+		Memory::Memcpy(atrac->data_buf, buffer, std::min(bufferSize, atrac->first.filesize));
+			
+		return __AtracSetContext(atrac, buffer, bufferSize);
 #endif // _USE_DSHOW
 
 		}
@@ -1316,7 +1336,7 @@ bool initAT3plusDecoder(Atrac *atrac, u32 dataSize = 0xffb4a8)
 				atrac->atracBitrate = ((atrac->atracBitrate >> 11) + 8) & 0xFFFFFFF0; 
 			else
 				atrac->atracBitrate = (atrac->atracBitrate + 511) >> 10; 
-			*(u32*)(at3plusHeader + 0x1c) = atrac->atracBitrate / 8;
+			*(u32*)(at3plusHeader + 0x1c) = atrac->atracBitrate * 1000 / 8;
 			*(u16*)(at3plusHeader + 0x3e) = at3plusHeaderMap[i + 1][0];
 			*(u32*)(at3plusHeader + sizeof(at3plusHeader) - 4) = dataSize;
 			return true;
@@ -1376,6 +1396,7 @@ int sceAtracLowLevelDecode(int atracID, u32 sourceAddr, u32 sourceBytesConsumedA
 		if (engine) {
 			int numSamples = 0;
 			s16* out = (s16*)Memory::GetPointer(samplesAddr);
+			memset(out, 0, ATRAC_MAX_SAMPLES * sizeof(s16) * atrac->atracOutputChannels);
 			static s16 buf[ATRAC_MAX_SAMPLES * 2];
 			int gotsize = engine->getNextSamples((u8*)buf, ATRAC_MAX_SAMPLES * sizeof(s16) * atrac->atracChannels);
 			numSamples = gotsize / sizeof(s16) / atrac->atracChannels;
@@ -1390,14 +1411,14 @@ int sceAtracLowLevelDecode(int atracID, u32 sourceAddr, u32 sourceBytesConsumedA
 					*out++ = sampleR;
 			}
 			atrac->currentSample += numSamples;
-			if (numSamples == 0) {
-				numSamples = ATRAC_MAX_SAMPLES / 4;
-				memset(out, 0, numSamples * sizeof(s16) * atrac->atracOutputChannels);
+			if (numSamples == 0 && atrac->first.filesize == atrac->first.size) {
+				Memory::Write_U32(atrac->atracBytesPerFrame, sourceBytesConsumedAddr);
 			}
+			numSamples = ATRAC_MAX_SAMPLES;
 			Memory::Write_U32(numSamples * sizeof(s16) * atrac->atracOutputChannels, sampleBytesAddr);
 		} else {
 			int outputChannels = atrac ? atrac->atracOutputChannels : 2;
-			Memory::Write_U32(ATRAC_MAX_SAMPLES * sizeof(s16) * atrac->atracOutputChannels, sampleBytesAddr);
+			Memory::Write_U32(ATRAC_MAX_SAMPLES * sizeof(s16) * outputChannels, sampleBytesAddr);
 			Memory::Memset(samplesAddr, 0, ATRAC_MAX_SAMPLES * sizeof(s16) * outputChannels);
 		}
 	}
